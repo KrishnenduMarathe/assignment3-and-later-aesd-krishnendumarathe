@@ -7,7 +7,7 @@ on:
             - '*'
 jobs:
   full-test:
-    container: cuaesd/aesd-autotest:assignment3
+    container: cuaesd/aesd-autotest:assignment6
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v2
@@ -20,7 +20,7 @@ jobs:
       - name: Run full test
         run: ./full-test.sh
   unit-test:
-    container: cuaesd/aesd-autotest:assignment3
+    container: cuaesd/aesd-autotest:assignment6
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v2
