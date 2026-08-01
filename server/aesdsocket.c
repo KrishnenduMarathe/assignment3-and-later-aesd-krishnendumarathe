@@ -240,6 +240,20 @@ void* threaded_function(void *thread_arg) {
 
         if (newlinefound) {
             newlinefound = 0;
+
+            // lock mutex
+            ret = pthread_mutex_lock(thread_param->mutex);
+            if (ret != 0) {
+                if (!grace_exit) syslog(LOG_ERR, "(thread %d) client %s failed to lock the mutex", thread_param->index, thread_param->cip);
+                thread_param->status = 1;
+                if (thread_param->cip != NULL) free(thread_param->cip);
+                if (dynbuffer != NULL) free(dynbuffer);
+                close(thread_param->cfd);
+
+                goto thread_cleanup;
+            }
+            mutex_locked_by_us = 1;
+
             // seek back on the file to the beginning
             lseek(thread_param->fd, 0, SEEK_SET);
 
@@ -274,6 +288,20 @@ void* threaded_function(void *thread_arg) {
 
             // restore file seek
             lseek(thread_param->fd, 0, SEEK_END);
+
+            // unlock mutex
+            ret = pthread_mutex_unlock(thread_param->mutex);
+            if (ret != 0) {
+                if (!grace_exit) syslog(LOG_ERR, "(thread %d) client %s failed to unlock the mutex", thread_param->index, thread_param->cip);
+                thread_param->status = 1;
+                if (thread_param->cip != NULL) free(thread_param->cip);
+                if (dynbuffer != NULL) free(dynbuffer);
+                if (data != NULL) free(data);
+                close(thread_param->cfd);
+
+                goto thread_cleanup;
+            }
+            mutex_locked_by_us = 0;
 
             ret = write(thread_param->cfd, data, fsize * sizeof(char));
             if (ret < 0) {
@@ -337,7 +365,7 @@ int main(int argc, char **argv) {
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(hints));
 
-    hints.ai_family = AF_INET6;
+    hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
     hints.ai_protocol = 0;
@@ -613,7 +641,7 @@ queue_cleanup:
     
     // stop all threads
     curr = STAILQ_FIRST(&head);
-    STAILQ_FOREACH(next, &head, entries)
+    STAILQ_FOREACH(next, &head, entries) {
         // traverse to kill threads and cleanup resources
         if (next->thread_param.status != -1) {
             ret = pthread_join(next->thread_id, NULL);
@@ -621,6 +649,7 @@ queue_cleanup:
                 syslog(LOG_ERR, "(thread %d) Error joining thread with error %s. Skipping...", next->thread_param.index, strerror(errno));
             }
         }
+    }
 
     // cleanup queue data
     pthread_mutex_destroy(&mutex);
