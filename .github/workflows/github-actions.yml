@@ -7,24 +7,33 @@ on:
             - '*'
 jobs:
   full-test:
-    container: cuaesd/aesd-autotest:assignment6
+    container: cuaesd/aesd-autotest:assignment7
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v2
       - name: Checkout submodules
         run : git submodule update --init --recursive
+      
       - name: Install dependencies
         run: |
           apt update
           apt install netcat valgrind
+
       - name: Run full test
         run: ./full-test.sh
+
   unit-test:
-    container: cuaesd/aesd-autotest:assignment6
+    container: cuaesd/aesd-autotest:assignment7
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v2
       - name: Checkout submodules
         run : git submodule update --init --recursive
+
+      - name: Install dependencies
+        run: |
+          apt update
+          apt install netcat valgrind
+
       - name: Run unit test
         run: ./unit-test.sh
