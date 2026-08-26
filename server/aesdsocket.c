@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <sched.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
@@ -12,6 +13,11 @@
 #include <sys/queue.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+
+// default set for device driver
+#ifndef USE_AESD_CHAR_DEVICE
+	#define USE_AESD_CHAR_DEVICE 1
+#endif
 
 #define N_BACKLOG 10
 
@@ -51,6 +57,8 @@ void handle_termination(int signum) {
 }
 
 // timer callback
+#if USE_AESD_CHAR_DEVICE != 1
+
 void timer_callback(union sigval sv) {
     int ret;
     int timer_locked_mutex = 0;
@@ -114,6 +122,7 @@ timer_cleanup:
 
     return;
 }
+#endif // timer callback
 
 void* threaded_function(void *thread_arg) {
     int ret;
@@ -129,6 +138,11 @@ void* threaded_function(void *thread_arg) {
     // dyanmic buffering for incoming data
     char* dynbuffer = NULL;
     unsigned int dynbuffersize = 0;
+
+// define fd for char device
+#if USE_AESD_CHAR_DEVICE == 1
+	int fd = -1;
+#endif
 
     while (grace_exit == 0) {
         // get data from client
@@ -196,9 +210,29 @@ void* threaded_function(void *thread_arg) {
             }
             mutex_locked_by_us = 1;
 
-            // write to file
+			// write to file
+#if USE_AESD_CHAR_DEVICE == 1
+			fd = open("/dev/aesdchar", O_RDWR, 0644);
+			if (fd < 0) {
+				if (!grace_exit) syslog(LOG_ERR, "Failed to open /dev/aesdchar with error: %s", strerror(errno));
+				fd = -1;
+				thread_param->status = 1;
+                if (thread_param->cip != NULL) free(thread_param->cip);
+                if (dynbuffer != NULL) free(dynbuffer);
+                close(thread_param->cfd);
+                
+                goto thread_cleanup;
+			}
+
+			ret = write(fd, dynbuffer, length * sizeof(char)); 
+
+			close(fd);
+			fd = -1;
+#else
             ret = write(thread_param->fd, dynbuffer, length * sizeof(char));
-            if (ret < 0) {
+#endif
+
+			if (ret < 0) {
                 if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to write to /var/tmp/aesdsocketdata with error: %s", thread_param->index, strerror(errno));
                 thread_param->status = 1;
                 if (thread_param->cip != NULL) free(thread_param->cip);
@@ -254,10 +288,30 @@ void* threaded_function(void *thread_arg) {
             }
             mutex_locked_by_us = 1;
 
-            // seek back on the file to the beginning
-            lseek(thread_param->fd, 0, SEEK_SET);
+			// seek back on the file to the beginning
+			int *use_fd = NULL;
 
-            unsigned int fsize = lseek(thread_param->fd, 0, SEEK_END);
+#if USE_AESD_CHAR_DEVICE == 1
+			fd = open("/dev/aesdchar", O_RDWR, 0644);
+			if (fd < 0) {
+				if (!grace_exit) syslog(LOG_ERR, "Failed to open /dev/aesdchar with error: %s", strerror(errno));
+				fd = -1;
+				thread_param->status = 1;
+                if (thread_param->cip != NULL) free(thread_param->cip);
+                if (dynbuffer != NULL) free(dynbuffer);
+                close(thread_param->cfd);
+                
+                goto thread_cleanup;
+			}
+
+			use_fd = &fd;
+#else	
+            use_fd = &thread_param->fd;
+#endif
+
+			lseek(*use_fd, 0, SEEK_SET);
+
+            unsigned int fsize = lseek(*use_fd, 0, SEEK_END);
 
             char* data = (char*) malloc((fsize+1) * sizeof(char));
             if (data == NULL) {
@@ -271,9 +325,9 @@ void* threaded_function(void *thread_arg) {
             }
 
             // send data to client
-            lseek(thread_param->fd, 0, SEEK_SET);
+            lseek(*use_fd, 0, SEEK_SET);
 
-            ret = read(thread_param->fd, data, fsize * sizeof(char));
+            ret = read(*use_fd, data, fsize * sizeof(char));
             if (ret < 0) {
                 if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to read from /var/tmp/aesdsocketdata with error: %s", thread_param->index, strerror(errno));
                 thread_param->status = 1;
@@ -287,7 +341,11 @@ void* threaded_function(void *thread_arg) {
             data[fsize] = '\0';
 
             // restore file seek
-            lseek(thread_param->fd, 0, SEEK_END);
+            lseek(*use_fd, 0, SEEK_END);
+
+#if USE_AESD_CHAR_DEVICE == 1
+			close(fd);
+#endif
 
             // unlock mutex
             ret = pthread_mutex_unlock(thread_param->mutex);
@@ -327,6 +385,12 @@ void* threaded_function(void *thread_arg) {
     close(thread_param->cfd);
 
 thread_cleanup:
+
+// cleanup fd
+#if USE_AESD_CHAR_DEVICE == 1
+	if (fd != -1) close(fd);
+#endif
+
     if (mutex_locked_by_us) {
         ret = pthread_mutex_unlock(thread_param->mutex);
         if (ret != 0) {
@@ -477,12 +541,23 @@ int main(int argc, char **argv) {
     }
 
     // initiate data file
-    fd = open("/var/tmp/aesdsocketdata", O_RDWR | O_CREAT | O_APPEND, 0644);
+#if USE_AESD_CHAR_DEVICE != 1
+	fd = open("/var/tmp/aesdsocketdata", O_RDWR | O_CREAT | O_APPEND, 0644);
     if (fd < 0) {
         if (!grace_exit) syslog(LOG_ERR, "Failed to create/open /var/tmp/aesdsocketdata with error: %s", strerror(errno));
 
         goto cleanup;
     }
+#else
+
+	// assuing the read operation won't be mutex locked
+	fd = open("/dev/aesdchar", O_RDWR, 0644);
+	if (fd < 0) {
+		if (!grace_exit) syslog(LOG_ERR, "Failed to open /dev/aesdchar with error: %s", strerror(errno));
+
+		goto cleanup;
+	}
+#endif
 
     //  start queue
     unsigned int queue = 0;
@@ -493,6 +568,8 @@ int main(int argc, char **argv) {
     pthread_mutex_t mutex;
     pthread_mutex_init(&mutex, NULL);
 
+// timer setup
+#if USE_AESD_CHAR_DEVICE != 1
     // initiate timer
     timer_t timerid;
     struct sigevent sev;
@@ -531,6 +608,7 @@ int main(int argc, char **argv) {
         goto queue_cleanup;
     }
     alarm_set = 1;
+#endif // timer setup
 
     while (grace_exit == 0) {
         // accept connection
@@ -555,8 +633,14 @@ int main(int argc, char **argv) {
         // setup node and start thread
         int cip_len = 0;
         elm->thread_param.index = queue;
+
+#if USE_AESD_CHAR_DEVICE == 1
+		elm->thread_param.fd = -1;
+#else
         elm->thread_param.fd = fd;
-        elm->thread_param.cfd = cfd;
+#endif
+
+		elm->thread_param.cfd = cfd;
         elm->thread_param.status = -1;
         elm->thread_param.mutex = &mutex;
 
@@ -629,6 +713,9 @@ int main(int argc, char **argv) {
     }
 
 queue_cleanup:
+
+// timer cleanup
+#if USE_AESD_CHAR_DEVICE != 1
     // disarm timer
     if (alarm_set) {
         ret = timer_delete(timerid);
@@ -636,6 +723,7 @@ queue_cleanup:
             syslog(LOG_ERR, "Failed to disarm Timer with error %s. Continue cleaning up...", strerror(errno));
         }
     }
+#endif // timer cleanup
 
     struct node *curr, *next;
     
@@ -669,7 +757,11 @@ cleanup:
 
     // gracefully exit
     if (sfd != -1) close(sfd);
+
+// cleanup fd on file
+#if USE_AESD_CHAR_DEVICE != 1
     if (fd != -1) close(fd);
+#endif
 
     // delete data file
     ret = unlink("/var/tmp/aesdsocketdata");

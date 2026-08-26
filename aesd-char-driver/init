@@ -1,0 +1,57 @@
+#! /bin/sh
+
+### BEGIN INIT INFO
+# Provides:          aesdchar device
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Setup /dev/aesdchar on boot
+### END INIT INFO
+
+KVER=$(uname -r)
+MODLOC="/lib/modules/$KVER/extra"
+
+case "$1" in
+
+start)
+
+echo "Loading aesdchar device"
+module="aesdchar"
+device="aesdchar"
+mode="664"
+
+insmod $MODLOC/$module.ko $* || exit 1
+
+major=$(awk "\$2==\"$module\" {print \$1}" /proc/devices)
+if [ ! -z ${major} ]; then
+	echo "Remove any existing /dev node for /dev/${device}"
+	rm -f /dev/${device}
+	echo "Add a node for our device at /dev/${device} using mknod"
+	mknod -m $mode /dev/${device} c $major 0
+else
+	echo "No device found in /proc/devices for driver ${module} (this driver may not allocate a device)"
+fi
+
+;;
+
+stop)
+echo "Unloading aesdchar device"
+
+module="aesdchar"
+device="aesdchar"
+
+rmmod $module || exit 1
+
+# Remove stale nodes
+rm -f /dev/${device}
+
+;;
+
+*)
+echo "Usage: $0 {start|stop}"
+exit 1
+
+esac
+
+exit 0

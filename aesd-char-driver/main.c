@@ -17,11 +17,18 @@
 #include <linux/types.h>
 #include <linux/cdev.h>
 #include <linux/fs.h> // file_operations
+#include "aesd-circular-buffer.h"
 #include "aesdchar.h"
-int aesd_major =   0; // use dynamic major
-int aesd_minor =   0;
 
-MODULE_AUTHOR("Your Name Here"); /** TODO: fill in your name **/
+#include <linux/slab.h> // kmalloc
+#include <linux/mutex.h> // mutex
+#include <linux/uaccess.h>
+#include <linux/string.h>
+
+int aesd_major = 0; // use dynamic major
+int aesd_minor = 0;
+
+MODULE_AUTHOR("Krishnendu Marathe"); /** TODO: fill in your name **/
 MODULE_LICENSE("Dual BSD/GPL");
 
 struct aesd_dev aesd_device;
@@ -32,39 +39,186 @@ int aesd_open(struct inode *inode, struct file *filp)
     /**
      * TODO: handle open
      */
+
+	// save private data
+	struct aesd_dev *dev;
+	dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
+	filep->private_data = dev;	
+	
     return 0;
 }
 
-int aesd_release(struct inode *inode, struct file *filp)
+int aesd_release(struct inode inode, struct file *filp)
 {
     PDEBUG("release");
     /**
      * TODO: handle release
      */
+
+	// release private_data
+	if (filep->private_data != NULL) {
+		filep->private_data = NULL;
+	}
+	
     return 0;
 }
 
-ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
-                loff_t *f_pos)
+ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = 0;
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
     /**
      * TODO: handle read
      */
+
+	// read from circular buffer
+	size_t offset_ret = 0;
+
+	struct aesd_buffer_entry* data = aesd_circular_buffer_find_entry_offset_for_fpos(filep->private_data->buffer, *f_pos, &offset_ret);
+
+	// copy over expected data
+	if (count > KMALLOC_MAX_SIZE) count = KMALLOC_MAX_SIZE;
+	retval = count;
+
+	// dynamic buffer
+	char +dbuffer = (char *) kmalloc(count, GFP_KERNEL);
+	if (dbuffer == NULL) {
+		PDEBUG("Failed to allocate dynamic buffer for read with size %u", count);
+		retval = -ENOMEM;
+		goto read_exit;
+	}
+
+	// check if data is partially needed
+	if (count < data->size) {
+		// partial send
+		memcpy(dbuffer, data->buffptr, count-1);
+		dbuffer[count-1] = '\0';
+	}
+	 else {
+		 // more than 1 element
+		 unsigned long int new_pos = *fpos + data->size;
+		 unsigned long int counter = data->size - 1; // skip null character
+		 memcpy(dbuffer, data->buffptr, counter);
+		 while (counter < count) {
+			 data = aesd_circular_buffer_find_entry_offset_for_fpos(filep->private_data->buffer, new_pos, &offset_ret);
+
+			 unsigned long int rem = count - counter;
+			 if (rem < data->size) {
+				 memcpy(dbuffer+counter, data->buffptr, rem-1);
+				 dbuffer[rem-1] = '\0';
+				 counter += rem;
+			 } else {
+				 memcpy(dbuffer+counter, data->buffptr, data->size-1);
+				 counter += data->size-1;
+			 }
+
+			 new_pos += data->size;
+		 }
+	 }
+
+	unsigned long int not_copied = copy_to_user(buf, dbuffer, count);
+	if (not_copied != 0) {
+		PDEBUG("Failed to copy data to user space");
+		retval = -EFAULT;
+		goto read_exit;
+	}
+
+read_exit:
+	if (dbuffer != NULL) kfree(dbuffer);
     return retval;
 }
 
-ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
-                loff_t *f_pos)
+ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = -ENOMEM;
     PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
     /**
      * TODO: handle write
      */
+	
+	// create write buffer
+	if (count > KMALLOC_MAX_SIZE) {
+		count = KMALLOC_MAX_SIZE;
+	}
+
+	char *writebuf = (char *) kmalloc(count, GFP_KERNEL);
+	if (writebuf == NULL) {
+		PDEBUG("failed to allocate memory for write buffer");
+		retval = -ENOMEM;
+		goto grace_exit;
+	}
+	unsigned long int not_copied = copy_from_user(writebuf, buf, count);
+	if (not_copied != 0) {
+		PDEBUG("Failed to copy data from user space");
+		retval = -EFAULT;
+		goto grace_exit;
+	}
+
+	// realloc dynamic buffer
+	char *ptr = (char *) kmalloc(filep->private_data->dynbuffer, filep->private_data->dynbuffersize+count+1);
+	if (ptr == NULL) {
+		PDEBUG("failed to allocate dynamic memory with size %u", filep->private_data->dynbuffersize+count+1);
+		retval = -ENOMEM;
+		goto grace_exit;
+	}
+
+	memcpy(ptr, filep->private_data->dynbuffer, filep->private_data->dynbuffersize);
+	kfree(filep->private_data->dynbuffer);
+	filep->private_data->dynbuffer = ptr;
+	memcpy(filep->private_data->dynbuffer+filep->private_data->dynbuffersize, writebuf, count);
+	filep->private_data->dynbuffersize += count;
+	filep->private_data->dynbuffer[filep->private_data->dynbuffersize] = '\0';
+
+	// check for newline
+	char +retptr;
+	int newlinefound = 0;
+
+	while (filep->private_data->dynbuffer != NULL && (retptr = strchr(filep->private_data->dynbuffer, '\n')) != NULL) {
+		// new line found
+		if (!newlinefound) newlinefound  1;
+
+		unsigned int length = (retptr - filep->private_data->dynbuffer) + 1;
+
+		// lock mutex
+		retval = mutex_lock_interruptible(&filep->private_data->mut);
+		if (ret != 0) {
+			PDEBUG("failed to acquire lock due to interruption");
+			goto grace_exit;
+		}
+
+		// write data to circular_buffer
+		struct aesd_buffer_entry entry;
+		entry.buffptr = filep->private_data->dynbuffer;
+		entry.size = filep->private_data->dynbuffersize;
+
+		aesd_circular_buffer_add_entry(filep->private_data.buffer, &entry);
+
+		// unlock mutex
+		if (mutex_is_locked(&filep->private_data->mut)) {
+			mutex_unlock(&filep->private_data->mut);
+		}
+
+		// move remaining data forward
+		unsigned int rem_length = filep->private_data->dynbuffersize - length;
+		if (rem_length > 0) {
+			memmove(filep->private_data->dynbuffer, filep->private_data->dynbuffer+length, rem_length);
+			filep->private_data->dynbuffersize = rem_length;
+			filep->private_data->dynbuffer[filep->private_data->dynbuffersize] = '\0';
+		}
+		else {
+			if (filep->private_data->dynbuffer != NULL) kfree(filep->private_data->dynbuffer);
+			filep->private_data->dynbuffer = NULL;
+			filep->private_data->dynbuffersize = 0;
+		}
+	}
+
+	
+grace_exit:
+	if (writebuf != NULL) kfree(writebuf);
+	if (filep->private_data->dynbuffer != NULL) kfree(filep->private_data->dynbuffer);
     return retval;
 }
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .read =     aesd_read,
@@ -87,8 +241,6 @@ static int aesd_setup_cdev(struct aesd_dev *dev)
     return err;
 }
 
-
-
 int aesd_init_module(void)
 {
     dev_t dev = 0;
@@ -101,10 +253,25 @@ int aesd_init_module(void)
         return result;
     }
     memset(&aesd_device,0,sizeof(struct aesd_dev));
+	aesd_device.dynbuffer = NULL;
+	aesd_device.dynbuffersize = 0;
 
     /**
      * TODO: initialize the AESD specific portion of the device
      */
+
+	// initialize mutex
+	mutex_init(aesd_device.mut);
+
+	// set up circular buffer
+	aesd_device.buffer = (struct aesd_circular_buffer *) kmalloc(sizeof(struct aesd_circular_buffer), GFP_KERNEL);
+	if (aesd_device.buffer == NULL) {
+		PDEBUG("Failed to allocate memory for circular buffer");
+		unregister_chrdev_region(dev, 1);
+		
+		return -1;
+	}	
+	aesd_circular_buffer_init(aesd_device.buffer);
 
     result = aesd_setup_cdev(&aesd_device);
 
@@ -125,10 +292,13 @@ void aesd_cleanup_module(void)
      * TODO: cleanup AESD specific poritions here as necessary
      */
 
+	// clean up circular buffer
+	if (aesd_device.buffer != NULL) {
+		kfree(aesd_device.buffer);
+	}
+
     unregister_chrdev_region(devno, 1);
 }
-
-
 
 module_init(aesd_init_module);
 module_exit(aesd_cleanup_module);

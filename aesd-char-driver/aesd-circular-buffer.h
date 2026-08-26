@@ -26,7 +26,7 @@ struct aesd_buffer_entry
     const char *buffptr;
     /**
      * Number of bytes stored in buffptr
-     */
+*/
     size_t size;
 };
 
