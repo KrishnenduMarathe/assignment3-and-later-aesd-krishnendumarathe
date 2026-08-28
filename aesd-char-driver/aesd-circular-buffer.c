@@ -10,8 +10,16 @@
 
 #ifdef __KERNEL__
 #include <linux/string.h>
+#include <linux/slab.h>
+
+#define FREEM(ptr) kfree(ptr)
+
 #else
 #include <string.h>
+#include <stdlib.h>
+
+#define FREEM(ptr) free(ptr)
+
 #endif
 
 #include "aesd-circular-buffer.h"
@@ -85,7 +93,7 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
 
 	// free old entry
 	if (rm_entry != NULL) {
-		kfree(rm_entry->buffptr);
+		FREEM(rm_entry->buffptr);
 	}
 	
     buffer->entry[buffer->in_offs] = *add_entry;
