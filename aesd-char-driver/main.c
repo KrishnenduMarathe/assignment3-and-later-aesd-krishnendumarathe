@@ -33,7 +33,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 struct aesd_dev aesd_device;
 
-int aesd_open(struct inode *inode, struct file *filp)
+int aesd_open(struct inode *inode, struct file *filep)
 {
     PDEBUG("open");
     /**
@@ -48,7 +48,7 @@ int aesd_open(struct inode *inode, struct file *filp)
     return 0;
 }
 
-int aesd_release(struct inode inode, struct file *filp)
+int aesd_release(struct inode inode, struct file *filep)
 {
     PDEBUG("release");
     /**
@@ -63,7 +63,7 @@ int aesd_release(struct inode inode, struct file *filp)
     return 0;
 }
 
-ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
+ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = 0;
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
@@ -81,7 +81,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_p
 	retval = count;
 
 	// dynamic buffer
-	char +dbuffer = (char *) kmalloc(count, GFP_KERNEL);
+	char *dbuffer = (char *) kmalloc(count, GFP_KERNEL);
 	if (dbuffer == NULL) {
 		PDEBUG("Failed to allocate dynamic buffer for read with size %u", count);
 		retval = -ENOMEM;
@@ -96,7 +96,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_p
 	}
 	 else {
 		 // more than 1 element
-		 unsigned long int new_pos = *fpos + data->size;
+		 unsigned long int new_pos = *f_pos + data->size;
 		 unsigned long int counter = data->size - 1; // skip null character
 		 memcpy(dbuffer, data->buffptr, counter);
 		 while (counter < count) {
@@ -128,7 +128,7 @@ read_exit:
     return retval;
 }
 
-ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
+ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = -ENOMEM;
     PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
@@ -170,18 +170,18 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 	filep->private_data->dynbuffer[filep->private_data->dynbuffersize] = '\0';
 
 	// check for newline
-	char +retptr;
+	char *retptr;
 	int newlinefound = 0;
 
 	while (filep->private_data->dynbuffer != NULL && (retptr = strchr(filep->private_data->dynbuffer, '\n')) != NULL) {
 		// new line found
-		if (!newlinefound) newlinefound  1;
+		if (!newlinefound) newlinefound = 1;
 
 		unsigned int length = (retptr - filep->private_data->dynbuffer) + 1;
 
 		// lock mutex
 		retval = mutex_lock_interruptible(&filep->private_data->mut);
-		if (ret != 0) {
+		if (retval != 0) {
 			PDEBUG("failed to acquire lock due to interruption");
 			goto grace_exit;
 		}
@@ -261,7 +261,7 @@ int aesd_init_module(void)
      */
 
 	// initialize mutex
-	mutex_init(aesd_device.mut);
+	mutex_init(&aesd_device.mut);
 
 	// set up circular buffer
 	aesd_device.buffer = (struct aesd_circular_buffer *) kmalloc(sizeof(struct aesd_circular_buffer), GFP_KERNEL);
