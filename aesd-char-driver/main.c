@@ -199,13 +199,19 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 		unsigned int length = (retptr - dev->dynbuffer) + 1;
 
 		// write data to circular_buffer
-		struct aesd_buffer_entry entry;
-		entry.buffptr = dev->dynbuffer;
-		entry.size = dev->dynbuffersize;
+		struct aesd_buffer_entry *entry;
+		entry = (struct aesd_buffer_entry *) kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
+		if (entry == NULL) {
+			PDEBUG("Failed to allocate memory for entry struct");
+			goto grace_exit;
+		}
 
-		entry.buffptr = (char *) kmalloc(dev->dynbuffersize, GFP_KERNEL);
-		if (entry.buffptr == NULL) {
+		entry->size = dev->dynbuffersize;
+
+		entry->buffptr = (char *) kmalloc(dev->dynbuffersize, GFP_KERNEL);
+		if (entry->buffptr == NULL) {
 			PDEBUG("Failed to allocate memorry to buffer for entry");
+			kfree(entry);
 			goto grace_exit;
 		}
 
@@ -216,8 +222,8 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 			goto grace_exit;
 		}
 
-		memcpy(entry.buffptr, dev->dynbuffer, dev->dynbuffersize);
-		aesd_circular_buffer_add_entry(dev->buffer, &entry);
+		memcpy(entry->buffptr, dev->dynbuffer, dev->dynbuffersize);
+		aesd_circular_buffer_add_entry(dev->buffer, entry);
 
 		// unlock mutex
 		if (mutex_is_locked(&dev->mut)) {

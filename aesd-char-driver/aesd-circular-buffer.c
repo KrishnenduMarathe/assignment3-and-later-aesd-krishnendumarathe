@@ -80,6 +80,14 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
     if (buffer->in_offs >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED - 1) loop_over = true;
 
     // assign buffer to offset
+	struct aesd_buffer_entry *rm_entry;
+	rm_entry = &buffer->entry[buffer->in_offs];
+
+	// free old entry
+	if (rm_entry != NULL) {
+		kfree(rm_entry->buffptr);
+	}
+	
     buffer->entry[buffer->in_offs] = *add_entry;
 
     if (loop_over) {
