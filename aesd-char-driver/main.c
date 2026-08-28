@@ -71,10 +71,13 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
      * TODO: handle read
      */
 
+	// get pointer to custom driver struct
+	struct aesd_dev *dev = (struct aesd_dev *) filep->private_data;
+
 	// read from circular buffer
 	size_t offset_ret = 0;
 
-	struct aesd_buffer_entry* data = aesd_circular_buffer_find_entry_offset_for_fpos(filep->private_data->buffer, *f_pos, &offset_ret);
+	struct aesd_buffer_entry* data = aesd_circular_buffer_find_entry_offset_for_fpos(dev->buffer, *f_pos, &offset_ret);
 
 	// copy over expected data
 	if (count > KMALLOC_MAX_SIZE) count = KMALLOC_MAX_SIZE;
@@ -100,7 +103,7 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 		 unsigned long int counter = data->size - 1; // skip null character
 		 memcpy(dbuffer, data->buffptr, counter);
 		 while (counter < count) {
-			 data = aesd_circular_buffer_find_entry_offset_for_fpos(filep->private_data->buffer, new_pos, &offset_ret);
+			 data = aesd_circular_buffer_find_entry_offset_for_fpos(dev->buffer, new_pos, &offset_ret);
 
 			 unsigned long int rem = count - counter;
 			 if (rem < data->size) {
@@ -135,6 +138,9 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
     /**
      * TODO: handle write
      */
+
+	// get pointer for custom driver struct
+	struct aesd_dev *dev = (struct aesd_dev *) filep->private_data;
 	
 	// create write buffer
 	if (count > KMALLOC_MAX_SIZE) {
@@ -155,32 +161,32 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 	}
 
 	// realloc dynamic buffer
-	char *ptr = (char *) kmalloc(filep->private_data->dynbuffer, filep->private_data->dynbuffersize+count+1);
+	char *ptr = (char *) kmalloc(dev->dynbuffer, dev->dynbuffersize+count+1);
 	if (ptr == NULL) {
-		PDEBUG("failed to allocate dynamic memory with size %u", filep->private_data->dynbuffersize+count+1);
+		PDEBUG("failed to allocate dynamic memory with size %u", dev->dynbuffersize+count+1);
 		retval = -ENOMEM;
 		goto grace_exit;
 	}
 
-	memcpy(ptr, filep->private_data->dynbuffer, filep->private_data->dynbuffersize);
-	kfree(filep->private_data->dynbuffer);
-	filep->private_data->dynbuffer = ptr;
-	memcpy(filep->private_data->dynbuffer+filep->private_data->dynbuffersize, writebuf, count);
-	filep->private_data->dynbuffersize += count;
-	filep->private_data->dynbuffer[filep->private_data->dynbuffersize] = '\0';
+	memcpy(ptr, dev->dynbuffer, dev->dynbuffersize);
+	kfree(dev->dynbuffer);
+	dev->dynbuffer = ptr;
+	memcpy(dev->dynbuffer + dev->dynbuffersize, writebuf, count);
+	dev->dynbuffersize += count;
+	dev->dynbuffer[dev->dynbuffersize] = '\0';
 
 	// check for newline
 	char *retptr;
 	int newlinefound = 0;
 
-	while (filep->private_data->dynbuffer != NULL && (retptr = strchr(filep->private_data->dynbuffer, '\n')) != NULL) {
+	while (dev->dynbuffer != NULL && (retptr = strchr(dev->dynbuffer, '\n')) != NULL) {
 		// new line found
 		if (!newlinefound) newlinefound = 1;
 
-		unsigned int length = (retptr - filep->private_data->dynbuffer) + 1;
+		unsigned int length = (retptr - dev->dynbuffer) + 1;
 
 		// lock mutex
-		retval = mutex_lock_interruptible(&filep->private_data->mut);
+		retval = mutex_lock_interruptible(&dev->mut);
 		if (retval != 0) {
 			PDEBUG("failed to acquire lock due to interruption");
 			goto grace_exit;
@@ -188,34 +194,34 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 
 		// write data to circular_buffer
 		struct aesd_buffer_entry entry;
-		entry.buffptr = filep->private_data->dynbuffer;
-		entry.size = filep->private_data->dynbuffersize;
+		entry.buffptr = dev->dynbuffer;
+		entry.size = dev->dynbuffersize;
 
-		aesd_circular_buffer_add_entry(filep->private_data.buffer, &entry);
+		aesd_circular_buffer_add_entry(dev->buffer, &entry);
 
 		// unlock mutex
-		if (mutex_is_locked(&filep->private_data->mut)) {
-			mutex_unlock(&filep->private_data->mut);
+		if (mutex_is_locked(&dev->mut)) {
+			mutex_unlock(&dev->mut);
 		}
 
 		// move remaining data forward
-		unsigned int rem_length = filep->private_data->dynbuffersize - length;
+		unsigned int rem_length = dev->dynbuffersize - length;
 		if (rem_length > 0) {
-			memmove(filep->private_data->dynbuffer, filep->private_data->dynbuffer+length, rem_length);
-			filep->private_data->dynbuffersize = rem_length;
-			filep->private_data->dynbuffer[filep->private_data->dynbuffersize] = '\0';
+			memmove(dev->dynbuffer, dev->dynbuffer+length, rem_length);
+			dev->dynbuffersize = rem_length;
+			dev->dynbuffer[dev->dynbuffersize] = '\0';
 		}
 		else {
-			if (filep->private_data->dynbuffer != NULL) kfree(filep->private_data->dynbuffer);
-			filep->private_data->dynbuffer = NULL;
-			filep->private_data->dynbuffersize = 0;
+			if (dev->dynbuffer != NULL) kfree(dev->dynbuffer);
+			dev->dynbuffer = NULL;
+			dev->dynbuffersize = 0;
 		}
 	}
 
 	
 grace_exit:
 	if (writebuf != NULL) kfree(writebuf);
-	if (filep->private_data->dynbuffer != NULL) kfree(filep->private_data->dynbuffer);
+	if (dev->dynbuffer != NULL) kfree(dev->dynbuffer);
     return retval;
 }
 
