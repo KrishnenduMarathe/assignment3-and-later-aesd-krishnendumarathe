@@ -74,6 +74,14 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 	// get pointer to custom driver struct
 	struct aesd_dev *dev = (struct aesd_dev *) filep->private_data;
 
+	// lock mutex
+	retval = mutex_lock_interruptible(&dev->mut);
+	if (retval != 0) {
+		PDEBUG("failed to acquire lock due to interruption");
+		retval = -ERESTARTSYS;
+		goto read_exit;
+	}
+
 	// read from circular buffer
 	size_t offset_ret = 0;
 
@@ -127,6 +135,11 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 	}
 
 read_exit:
+	// unlock mutex
+	if (mutex_is_locked(&dev->mut)) {
+		mutex_unlock(&dev->mut);
+	}
+	
 	if (dbuffer != NULL) kfree(dbuffer);
     return retval;
 }
@@ -185,6 +198,17 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 
 		unsigned int length = (retptr - dev->dynbuffer) + 1;
 
+		// write data to circular_buffer
+		struct aesd_buffer_entry entry;
+		entry.buffptr = dev->dynbuffer;
+		entry.size = dev->dynbuffersize;
+
+		entry.buffptr = (char *) kmalloc(dev->dynbuffersize, GFP_KERNEL);
+		if (entry.buffptr == NULL) {
+			PDEBUG("Failed to allocate memorry to buffer for entry");
+			goto grace_exit;
+		}
+
 		// lock mutex
 		retval = mutex_lock_interruptible(&dev->mut);
 		if (retval != 0) {
@@ -192,11 +216,7 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 			goto grace_exit;
 		}
 
-		// write data to circular_buffer
-		struct aesd_buffer_entry entry;
-		entry.buffptr = dev->dynbuffer;
-		entry.size = dev->dynbuffersize;
-
+		memcpy(entry.buffptr, dev->dynbuffer, dev->dynbuffersize);
 		aesd_circular_buffer_add_entry(dev->buffer, &entry);
 
 		// unlock mutex
@@ -221,7 +241,6 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 	
 grace_exit:
 	if (writebuf != NULL) kfree(writebuf);
-	if (dev->dynbuffer != NULL) kfree(dev->dynbuffer);
     return retval;
 }
 
@@ -299,8 +318,20 @@ void aesd_cleanup_module(void)
      */
 
 	// clean up circular buffer
+	int index;
+	struct aesd_buffer_entry *entry;
+	AESD_CIRCULAR_BUFFER_FOREACH(entry, aesd_device.buffer, index) {
+		if (entry->buffptr != NULL) {
+			kfree(entry->buffptr);
+		}
+	}
+
 	if (aesd_device.buffer != NULL) {
 		kfree(aesd_device.buffer);
+	}
+
+	if (aesd_device.dynbuffer != NULL) {
+		kfree(aesd_device.dynbuffer);
 	}
 
     unregister_chrdev_region(devno, 1);
