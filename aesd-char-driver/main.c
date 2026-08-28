@@ -48,7 +48,7 @@ int aesd_open(struct inode *inode, struct file *filep)
     return 0;
 }
 
-int aesd_release(struct inode inode, struct file *filep)
+int aesd_release(struct inode* inode, struct file *filep)
 {
     PDEBUG("release");
     /**
@@ -161,7 +161,7 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 	}
 
 	// realloc dynamic buffer
-	char *ptr = (char *) kmalloc(dev->dynbuffer, dev->dynbuffersize+count+1);
+	char *ptr = (char *) kmalloc(dev->dynbuffersize+count+1, GFP_KERNEL);
 	if (ptr == NULL) {
 		PDEBUG("failed to allocate dynamic memory with size %u", dev->dynbuffersize+count+1);
 		retval = -ENOMEM;
