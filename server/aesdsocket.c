@@ -290,7 +290,7 @@ void* threaded_function(void *thread_arg) {
             mutex_locked_by_us = 1;
 
 			// seek back on the file to the beginning
-			char *data = NULL:
+			char *data = NULL;
 			int *use_fd = NULL;
 			unsigned int fsize = 0;
 
