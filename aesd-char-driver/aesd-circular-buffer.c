@@ -18,7 +18,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define FREEM(ptr) free(ptr)
+#define FREEM(ptr) free((void *) ptr)
 
 #endif
 
