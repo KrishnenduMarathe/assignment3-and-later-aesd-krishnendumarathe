@@ -24,6 +24,7 @@
 #include <linux/mutex.h> // mutex
 #include <linux/uaccess.h>
 #include <linux/string.h>
+#include <string.h>
 
 int aesd_major = 0; // use dynamic major
 int aesd_minor = 0;
@@ -98,6 +99,7 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 		retval = -ENOMEM;
 		goto read_exit;
 	}
+	memset(dbuffer, 0, count);
 
 	// check if data is partially needed
 	if (count < data->size) {
@@ -113,6 +115,12 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 		 while (counter < count) {
 			 data = aesd_circular_buffer_find_entry_offset_for_fpos(dev->buffer, new_pos, &offset_ret);
 
+			 // EOF
+			 if (data == NULL) {
+				 retval = 0;
+				 break;
+			 }
+
 			 unsigned long int rem = count - counter;
 			 if (rem < data->size) {
 				 memcpy(dbuffer+counter, data->buffptr, rem-1);
@@ -127,6 +135,7 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 		 }
 	 }
 
+	 // maybe need to handle EOF here. we are just assuming blank data in dbuffer
 	unsigned long int not_copied = copy_to_user(buf, dbuffer, count);
 	if (not_copied != 0) {
 		PDEBUG("Failed to copy data to user space");
@@ -146,9 +155,9 @@ read_exit:
 
 ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, loff_t *f_pos)
 {
-    ssize_t retval = -ENOMEM;
-    PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
-    /**
+	PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
+
+	/**
      * TODO: handle write
      */
 
@@ -159,6 +168,8 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 	if (count > KMALLOC_MAX_SIZE) {
 		count = KMALLOC_MAX_SIZE;
 	}
+
+	ssize_t retval = count;
 
 	char *writebuf = (char *) kmalloc(count, GFP_KERNEL);
 	if (writebuf == NULL) {
@@ -206,9 +217,9 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 			goto grace_exit;
 		}
 
-		entry->size = dev->dynbuffersize;
+		entry->size = length;
 
-		entry->buffptr = (char *) kmalloc(dev->dynbuffersize, GFP_KERNEL);
+		entry->buffptr = (char *) kmalloc(length, GFP_KERNEL);
 		if (entry->buffptr == NULL) {
 			PDEBUG("Failed to allocate memorry to buffer for entry");
 			kfree(entry);
@@ -222,7 +233,7 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 			goto grace_exit;
 		}
 
-		memcpy(entry->buffptr, dev->dynbuffer, dev->dynbuffersize);
+		memcpy(entry->buffptr, dev->dynbuffer, length);
 		aesd_circular_buffer_add_entry(dev->buffer, entry);
 
 		// unlock mutex
