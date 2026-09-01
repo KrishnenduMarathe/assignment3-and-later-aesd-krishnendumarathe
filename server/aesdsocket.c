@@ -2,6 +2,7 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <sched.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
@@ -289,7 +290,9 @@ void* threaded_function(void *thread_arg) {
             mutex_locked_by_us = 1;
 
 			// seek back on the file to the beginning
+			char *data = NULL:
 			int *use_fd = NULL;
+			unsigned int fsize = 0;
 
 #if USE_AESD_CHAR_DEVICE == 1
 			fd = open("/dev/aesdchar", O_RDWR, 0644);
@@ -305,15 +308,61 @@ void* threaded_function(void *thread_arg) {
 			}
 
 			use_fd = &fd;
+
+			unsigned int alloc_size = 512;
+			data = (char *) malloc(alloc_size * sizeof(char));
+			if (data == NULL) {
+				if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to allocate for data with error: %s", thread_param->index, strerror(errno));
+                thread_param->status = 1;
+                if (thread_param->cip != NULL) free(thread_param->cip);
+                if (dynbuffer != NULL) free(dynbuffer);
+                close(thread_param->cfd);
+                
+                goto thread_cleanup;
+			}
+
+			unsigned int bytes_read = 0;
+			while ((bytes_read = read(*use_fd, data + fsize, alloc_size - fsize)) > 0) {
+				fsize += bytes_read;
+
+				if (fsize >= alloc_size) {
+					alloc_size *= 2;
+					char *temp = realloc(data, alloc_size);
+					if (temp == NULL) {
+						if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to reallocate for data with error: %s", thread_param->index, strerror(errno));
+						thread_param->status = 1;
+						if (thread_param->cip != NULL) free(thread_param->cip);
+						if (dynbuffer != NULL) free(dynbuffer);
+						if (data != NULL) free(data);
+						close(thread_param->cfd);
+
+						goto thread_cleanup;
+					}
+
+					data = temp;
+				}
+			}
+
+			if (ret < 0) {
+                if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to read from /dev/aesdchar with error: %s", thread_param->index, strerror(errno));
+				thread_param->status = 1;
+                if (thread_param->cip != NULL) free(thread_param->cip);
+                if (dynbuffer != NULL) free(dynbuffer);
+                if (data != NULL) free(data);
+                close(thread_param->cfd);
+                
+                goto thread_cleanup;
+            }
+
+			data[fsize] = '\0';
 #else	
             use_fd = &thread_param->fd;
-#endif
 
 			lseek(*use_fd, 0, SEEK_SET);
 
-            unsigned int fsize = lseek(*use_fd, 0, SEEK_END);
+            fsize = lseek(*use_fd, 0, SEEK_END);
 
-            char* data = (char*) malloc((fsize+1) * sizeof(char));
+            data = (char*) malloc((fsize+1) * sizeof(char));
             if (data == NULL) {
                 if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to allocate for data with error: %s", thread_param->index, strerror(errno));
                 thread_param->status = 1;
@@ -330,7 +379,7 @@ void* threaded_function(void *thread_arg) {
             ret = read(*use_fd, data, fsize * sizeof(char));
             if (ret < 0) {
                 if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to read from /var/tmp/aesdsocketdata with error: %s", thread_param->index, strerror(errno));
-                thread_param->status = 1;
+				thread_param->status = 1;
                 if (thread_param->cip != NULL) free(thread_param->cip);
                 if (dynbuffer != NULL) free(dynbuffer);
                 if (data != NULL) free(data);
@@ -338,13 +387,11 @@ void* threaded_function(void *thread_arg) {
                 
                 goto thread_cleanup;
             }
+
             data[fsize] = '\0';
 
             // restore file seek
             lseek(*use_fd, 0, SEEK_END);
-
-#if USE_AESD_CHAR_DEVICE == 1
-			close(fd);
 #endif
 
             // unlock mutex
@@ -761,15 +808,17 @@ cleanup:
 // cleanup fd on file
 #if USE_AESD_CHAR_DEVICE != 1
     if (fd != -1) close(fd);
-#endif
 
-    // delete data file
+	// delete data file
     ret = unlink("/var/tmp/aesdsocketdata");
     if (ret < 0) {
         syslog(LOG_ERR, "Failed to remove /var/tmp/aesdsocketdata with error: %s", strerror(errno));
         closelog();
         return -1;
     }
+#endif
+
+    
 
     if (grace_exit) {
         syslog(LOG_DEBUG, "Caught signal, exiting");
