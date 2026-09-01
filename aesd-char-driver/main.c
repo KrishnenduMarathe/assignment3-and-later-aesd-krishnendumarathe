@@ -24,7 +24,6 @@
 #include <linux/mutex.h> // mutex
 #include <linux/uaccess.h>
 #include <linux/string.h>
-#include <string.h>
 
 int aesd_major = 0; // use dynamic major
 int aesd_minor = 0;
