@@ -65,6 +65,8 @@ int aesd_release(struct inode* inode, struct file *filep)
 
 ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_pos)
 {
+	// partial read flag assumes the fd is open while reading the entire team
+
     ssize_t retval = 0;
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
     /**
@@ -89,6 +91,7 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 	struct aesd_buffer_entry* data = aesd_circular_buffer_find_entry_offset_for_fpos(dev->buffer, *f_pos, &offset_ret);
 	if (data == NULL) {
 		// EOF
+		PDEBUG("-> at EOF");
 		goto read_exit;
 	}
 
@@ -96,10 +99,9 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 	if (count > KMALLOC_MAX_SIZE) {
 		count = KMALLOC_MAX_SIZE;
 	}
-	else {
-		if (count > data->size) {
-			count = data->size;
-		}
+	
+	if (count > data->size) {
+		count = data->size;
 	}
 
 	retval = count;
@@ -153,8 +155,10 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 		 }
 	 }*/
 
-	 // maybe need to handle EOF here. we are just assuming blank data in dbuffer
+	// maybe need to handle EOF here. we are just assuming blank data in dbuffer
 	unsigned long int not_copied = copy_to_user(buf, dbuffer, count);
+	PDEBUG("-> copied %u bytes to user space with %u not copied", count, not_copied);
+
 	if (not_copied != 0) {
 		PDEBUG("Failed to copy data to user space");
 		retval = -EFAULT;
@@ -196,6 +200,8 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 		goto grace_exit;
 	}
 	unsigned long int not_copied = copy_from_user(writebuf, buf, count);
+	PDEBUG("-> copied %u bytes from user space with %u not copied", count, not_copied);
+
 	if (not_copied != 0) {
 		PDEBUG("Failed to copy data from user space");
 		retval = -EFAULT;
@@ -203,7 +209,7 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 	}
 
 	// realloc dynamic buffer
-	char *ptr = (char *) kmalloc(dev->dynbuffersize+count+1, GFP_KERNEL);
+	char *ptr = (char *) kmalloc(dev->dynbuffersize+count, GFP_KERNEL);
 	if (ptr == NULL) {
 		PDEBUG("failed to allocate dynamic memory with size %u", dev->dynbuffersize+count+1);
 		retval = -ENOMEM;
@@ -215,7 +221,6 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 	dev->dynbuffer = ptr;
 	memcpy(dev->dynbuffer + dev->dynbuffersize, writebuf, count);
 	dev->dynbuffersize += count;
-	dev->dynbuffer[dev->dynbuffersize] = '\0';
 
 	// check for newline
 	char *retptr;
@@ -315,6 +320,7 @@ int aesd_init_module(void)
     memset(&aesd_device,0,sizeof(struct aesd_dev));
 	aesd_device.dynbuffer = NULL;
 	aesd_device.dynbuffersize = 0;
+	aesd_device.partial_read = 0;
 
     /**
      * TODO: initialize the AESD specific portion of the device

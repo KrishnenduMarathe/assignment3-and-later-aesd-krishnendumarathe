@@ -296,7 +296,8 @@ void* threaded_function(void *thread_arg) {
 
 			lseek(*use_fd, 0, SEEK_SET);
 
-			unsigned int alloc_size = 1;
+			unsigned int alloc_step = 4;
+			unsigned int alloc_size = 4;
 			data = (char *) malloc(alloc_size * sizeof(char));
 			if (data == NULL) {
 				if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to allocate for data with error: %s", thread_param->index, strerror(errno));
@@ -313,7 +314,7 @@ void* threaded_function(void *thread_arg) {
 				fsize += bytes_read;
 
 				if (fsize >= alloc_size) {
-					alloc_size *= 2;
+					alloc_size = fsize + alloc_step;
 					char *temp = realloc(data, alloc_size);
 					if (temp == NULL) {
 						if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to reallocate for data with error: %s", thread_param->index, strerror(errno));
