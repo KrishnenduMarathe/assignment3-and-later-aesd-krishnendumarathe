@@ -91,11 +91,9 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
     if (buffer->in_offs >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED - 1) loop_over = true;
 
 	// remove old entry
-	/*if (buffer->full) {
-		if (buffer->entry[buffer->in_offs].buffptr != NULL) {
-			FREEM(buffer->entry[buffer->in_offs].buffptr);
-		}
-	}*/
+	if (buffer->full) {
+		FREEM(buffer->entry[buffer->in_offs].buffptr);
+	}
 	
     buffer->entry[buffer->in_offs] = *add_entry;
 
