@@ -298,6 +298,7 @@ void* threaded_function(void *thread_arg) {
 
 			unsigned int alloc_step = 4;
 			unsigned int alloc_size = 4;
+
 			data = (char *) malloc(alloc_size * sizeof(char));
 			if (data == NULL) {
 				if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to allocate for data with error: %s", thread_param->index, strerror(errno));
@@ -330,6 +331,7 @@ void* threaded_function(void *thread_arg) {
 					data = temp;
 				}
 			}
+			ret = bytes_read;
 
 			if (ret < 0) {
                 if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to read from /dev/aesdchar with error: %s", thread_param->index, strerror(errno));
