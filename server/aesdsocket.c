@@ -309,7 +309,7 @@ void* threaded_function(void *thread_arg) {
 
 			use_fd = &fd;
 
-			unsigned int alloc_size = 512;
+			unsigned int alloc_size = 1;
 			data = (char *) malloc(alloc_size * sizeof(char));
 			if (data == NULL) {
 				if (!grace_exit) syslog(LOG_ERR, "(thread %d) Failed to allocate for data with error: %s", thread_param->index, strerror(errno));
