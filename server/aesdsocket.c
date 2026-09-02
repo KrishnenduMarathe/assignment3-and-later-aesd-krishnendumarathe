@@ -143,6 +143,18 @@ void* threaded_function(void *thread_arg) {
 // define fd for char device
 #if USE_AESD_CHAR_DEVICE == 1
 	int fd = -1;
+
+	fd = open("/dev/aesdchar", O_RDWR, 0644);
+	if (fd < 0) {
+		if (!grace_exit) syslog(LOG_ERR, "Failed to open /dev/aesdchar with error: %s", strerror(errno));
+		fd = -1;
+		thread_param->status = 1;
+		if (thread_param->cip != NULL) free(thread_param->cip);
+		if (dynbuffer != NULL) free(dynbuffer);
+		close(thread_param->cfd);
+
+		goto thread_cleanup;
+	}
 #endif
 
     while (grace_exit == 0) {
@@ -213,22 +225,7 @@ void* threaded_function(void *thread_arg) {
 
 			// write to file
 #if USE_AESD_CHAR_DEVICE == 1
-			fd = open("/dev/aesdchar", O_RDWR, 0644);
-			if (fd < 0) {
-				if (!grace_exit) syslog(LOG_ERR, "Failed to open /dev/aesdchar with error: %s", strerror(errno));
-				fd = -1;
-				thread_param->status = 1;
-                if (thread_param->cip != NULL) free(thread_param->cip);
-                if (dynbuffer != NULL) free(dynbuffer);
-                close(thread_param->cfd);
-                
-                goto thread_cleanup;
-			}
-
 			ret = write(fd, dynbuffer, length * sizeof(char)); 
-
-			close(fd);
-			fd = -1;
 #else
             ret = write(thread_param->fd, dynbuffer, length * sizeof(char));
 #endif
@@ -295,19 +292,9 @@ void* threaded_function(void *thread_arg) {
 			unsigned int fsize = 0;
 
 #if USE_AESD_CHAR_DEVICE == 1
-			fd = open("/dev/aesdchar", O_RDWR, 0644);
-			if (fd < 0) {
-				if (!grace_exit) syslog(LOG_ERR, "Failed to open /dev/aesdchar with error: %s", strerror(errno));
-				fd = -1;
-				thread_param->status = 1;
-                if (thread_param->cip != NULL) free(thread_param->cip);
-                if (dynbuffer != NULL) free(dynbuffer);
-                close(thread_param->cfd);
-                
-                goto thread_cleanup;
-			}
-
 			use_fd = &fd;
+
+			lseek(*use_fd, 0, SEEK_SET);
 
 			unsigned int alloc_size = 1;
 			data = (char *) malloc(alloc_size * sizeof(char));
