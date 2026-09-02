@@ -83,16 +83,29 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 	}
 
 	// read from circular buffer
+	char *dbuffer = NULL;
 	size_t offset_ret = 0;
 
 	struct aesd_buffer_entry* data = aesd_circular_buffer_find_entry_offset_for_fpos(dev->buffer, *f_pos, &offset_ret);
+	if (data == NULL) {
+		// EOF
+		goto read_exit;
+	}
 
 	// copy over expected data
-	if (count > KMALLOC_MAX_SIZE) count = KMALLOC_MAX_SIZE;
+	if (count > KMALLOC_MAX_SIZE) {
+		count = KMALLOC_MAX_SIZE;
+	}
+	else {
+		if (count > data->size) {
+			count = data->size;
+		}
+	}
+
 	retval = count;
 
 	// dynamic buffer
-	char *dbuffer = (char *) kmalloc(count, GFP_KERNEL);
+	dbuffer = (char *) kmalloc(count, GFP_KERNEL);
 	if (dbuffer == NULL) {
 		PDEBUG("Failed to allocate dynamic buffer for read with size %u", count);
 		retval = -ENOMEM;
@@ -100,13 +113,19 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 	}
 	memset(dbuffer, 0, count);
 
+	// copy data to buffer
+	memcpy(dbuffer, data->buffptr, count);
+
 	// check if data is partially needed
-	if (count < data->size) {
+	/*
+	 * UNNCESSARY HANDLING FOR A DRIVER
+	 *
+	 if (count < data->size) {
 		// partial send
 		memcpy(dbuffer, data->buffptr, count-1);
 		dbuffer[count-1] = '\0';
 	}
-	 else {
+	else {
 		 // more than 1 element
 		 unsigned long int new_pos = *f_pos + data->size;
 		 unsigned long int counter = data->size - 1; // skip null character
@@ -132,7 +151,7 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 
 			 new_pos += data->size;
 		 }
-	 }
+	 }*/
 
 	 // maybe need to handle EOF here. we are just assuming blank data in dbuffer
 	unsigned long int not_copied = copy_to_user(buf, dbuffer, count);
