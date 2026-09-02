@@ -320,7 +320,6 @@ int aesd_init_module(void)
     memset(&aesd_device,0,sizeof(struct aesd_dev));
 	aesd_device.dynbuffer = NULL;
 	aesd_device.dynbuffersize = 0;
-	aesd_device.partial_read = 0;
 
     /**
      * TODO: initialize the AESD specific portion of the device
