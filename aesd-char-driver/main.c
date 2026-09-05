@@ -261,6 +261,7 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 
 		memcpy(entry->buffptr, dev->dynbuffer, length);
 		aesd_circular_buffer_add_entry(dev->buffer, entry);
+		kfree(entry);
 
 		// unlock mutex
 		if (mutex_is_locked(&dev->mut)) {

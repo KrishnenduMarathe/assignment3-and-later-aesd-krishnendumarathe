@@ -585,15 +585,6 @@ int main(int argc, char **argv) {
 
         goto cleanup;
     }
-#else
-
-	// assuing the read operation won't be mutex locked
-	fd = open("/dev/aesdchar", O_RDWR, 0644);
-	if (fd < 0) {
-		if (!grace_exit) syslog(LOG_ERR, "Failed to open /dev/aesdchar with error: %s", strerror(errno));
-
-		goto cleanup;
-	}
 #endif
 
     //  start queue
