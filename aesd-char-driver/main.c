@@ -253,8 +253,8 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 		}
 
 		// lock mutex
-		retval = mutex_lock_interruptible(&dev->mut);
-		if (retval != 0) {
+		int lock_ret = mutex_lock_interruptible(&dev->mut);
+		if (lock_ret != 0) {
 			PDEBUG("failed to acquire lock due to interruption");
 			goto grace_exit;
 		}
