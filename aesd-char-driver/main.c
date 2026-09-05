@@ -100,8 +100,8 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 		count = KMALLOC_MAX_SIZE;
 	}
 	
-	if (count > data->size) {
-		count = data->size;
+	if (count > data->size - offset_ret) {
+		count = data->size - offset_ret;
 	}
 
 	retval = count;
@@ -116,7 +116,7 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 	memset(dbuffer, 0, count);
 
 	// copy data to buffer
-	memcpy(dbuffer, data->buffptr, count);
+	memcpy(dbuffer, data->buffptr + offset_ret, count);
 
 	// check if data is partially needed
 	/*
