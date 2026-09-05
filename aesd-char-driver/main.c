@@ -160,7 +160,7 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 	PDEBUG("-> copied %u bytes to user space with %u not copied", count, not_copied);
 
 	// update file offset
-	*fpos += retval;
+	*f_pos += retval;
 
 	if (not_copied != 0) {
 		PDEBUG("Failed to copy data to user space");
