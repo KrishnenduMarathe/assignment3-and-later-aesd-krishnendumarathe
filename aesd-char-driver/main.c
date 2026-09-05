@@ -116,44 +116,7 @@ ssize_t aesd_read(struct file *filep, char __user *buf, size_t count, loff_t *f_
 	memset(dbuffer, 0, count);
 
 	// copy data to buffer
-	memcpy(dbuffer, data->buffptr + offset_ret, count);
-
-	// check if data is partially needed
-	/*
-	 * UNNCESSARY HANDLING FOR A DRIVER
-	 *
-	 if (count < data->size) {
-		// partial send
-		memcpy(dbuffer, data->buffptr, count-1);
-		dbuffer[count-1] = '\0';
-	}
-	else {
-		 // more than 1 element
-		 unsigned long int new_pos = *f_pos + data->size;
-		 unsigned long int counter = data->size - 1; // skip null character
-		 memcpy(dbuffer, data->buffptr, counter);
-		 while (counter < count) {
-			 data = aesd_circular_buffer_find_entry_offset_for_fpos(dev->buffer, new_pos, &offset_ret);
-
-			 // EOF
-			 if (data == NULL) {
-				 retval = 0;
-				 break;
-			 }
-
-			 unsigned long int rem = count - counter;
-			 if (rem < data->size) {
-				 memcpy(dbuffer+counter, data->buffptr, rem-1);
-				 dbuffer[rem-1] = '\0';
-				 counter += rem;
-			 } else {
-				 memcpy(dbuffer+counter, data->buffptr, data->size-1);
-				 counter += data->size-1;
-			 }
-
-			 new_pos += data->size;
-		 }
-	 }*/
+	memcpy(dbuffer, data->buffptr + offset_ret, count);	
 
 	// maybe need to handle EOF here. we are just assuming blank data in dbuffer
 	unsigned long int not_copied = copy_to_user(buf, dbuffer, count);
@@ -212,7 +175,7 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 	}
 
 	// realloc dynamic buffer
-	char *ptr = (char *) kmalloc(dev->dynbuffersize+count, GFP_KERNEL);
+	char *ptr = (char *) kmalloc(dev->dynbuffersize+count+1, GFP_KERNEL);
 	if (ptr == NULL) {
 		PDEBUG("failed to allocate dynamic memory with size %u", dev->dynbuffersize+count+1);
 		retval = -ENOMEM;
@@ -224,6 +187,7 @@ ssize_t aesd_write(struct file *filep, const char __user *buf, size_t count, lof
 	dev->dynbuffer = ptr;
 	memcpy(dev->dynbuffer + dev->dynbuffersize, writebuf, count);
 	dev->dynbuffersize += count;
+	dev->dynbuffer[dev->dynbuffersize] = '\0';
 
 	// check for newline
 	char *retptr;
